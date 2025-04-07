@@ -35,4 +35,4 @@ jobs:
           retention-days: 1
       - name: Deploy
         id: deployment
-        uses: actions/deploay-pages@v4
+        uses: actions/deploy-pages@v4
