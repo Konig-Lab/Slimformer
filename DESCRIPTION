@@ -1,0 +1,20 @@
+Package: ViGOCat
+Title: ViGOCat Webtool
+Version: 0.1.0
+Authors@R: c()
+Description: Classify gene ontology terms into predefined tools.
+URL: https://konig-lab.github.io/ViGOCat
+BugReports: https://github.com/konig-lab/ViGOCat/issues
+License: MIT
+Depends: R (>= 4.4)
+Imports: 
+  shiny,
+  DT,
+  plotly,
+  shinyjs,
+  dplyr,
+  readxl,
+  tools,
+  readr,
+  stringi
+Encoding: UTF-8
