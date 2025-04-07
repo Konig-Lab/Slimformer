@@ -24,7 +24,6 @@ jobs:
         with:
           packages: |
             cran::shinylive@0.9.0
-            local::.
       - name: Create R Shinylive App
         shell: Rscript {0}
         run: |
