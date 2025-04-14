@@ -199,7 +199,7 @@ server <- function(input, output, session) {
     ext <- tolower(get_file_extension(file_path))
     
     df <- switch(ext,
-                 csv  = read.csv(file_path),
+                 csv  = read.delim(file_path, sep = ","),
                  tsv  = read.delim(file_path),
                  xls  = read_excel(file_path),
                  xlsx = read_excel(file_path),
