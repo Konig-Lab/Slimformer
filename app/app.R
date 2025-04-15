@@ -289,9 +289,9 @@ server <- function(input, output, session) {
     },
     content = function(file) {
       df_col <- data_reactive()
-      colnames(df_col)[which(colnames(df_col) == termname_col)] <- "term_id"
+      colnames(df_col)[which(colnames(df_col) == input$termname_col)] <- "term_id"
       data <- joinRef(data_reactive(), classification.look.up)
-      colnames(df_col)[which(colnames(df_col) == "term_id")] <- termname_col
+      colnames(df_col)[which(colnames(df_col) == "term_id")] <- input$termname_col
       write.csv(data, file, row.names=FALSE)
     },
     contentType = "text/csv"

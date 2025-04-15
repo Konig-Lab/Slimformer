@@ -22,8 +22,10 @@ diff.down <- filter(filter(diff.genes$table, logFC < -1), FDR < 0.05)
 gs.up <- gost(diff.up$Gene, sources = "GO:BP", evcodes = T)
 gs.down <- gost(diff.down$Gene, sources = "GO:BP", evcodes = T)
 
-gs.up <- filter(filter(gs.up$result, term_size > 10), term_size < 500)
-gs.down <- filter(filter(gs.down$result, term_size > 10), term_size < 500)
+gs.up <- filter(filter(data.frame(gs.up$result), term_size > 10), term_size < 500)
+gs.down <- filter(filter(data.frame(gs.down$result), term_size > 10), term_size < 500)
 
-write.csv(as.matrix(gs.up), "RSV_Example/upregulated_gene_sets.csv", row.names = F)
-write.csv(as.matrix(gs.down), "RSV_Example/downregulated_gene_sets.csv", row.names = F)
+write.table(as.matrix(gs.up), "RSV_Example/upregulated_gene_sets.tsv", sep = "\t")
+write.table(as.matrix(gs.down), "RSV_Example/downregulated_gene_sets.tsv", sep = "\t")
+
+read.csv("RSV_Example/upregulated_gene_sets.csv")
