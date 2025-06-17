@@ -88,7 +88,66 @@ plotPieChart <- function(data, ref, title="Pie Chart", by_gene_weight = FALSE) {
   return(fig)
 }
 
+plotScatterPlot <- function(data, ref, title="Scatter Plot") {
+  groups <- c("cell adhesion",
+              "cell cycle",
+              "cell death",
+              "cellular component organization",
+              "ER/endosome/lysosome related process",
+              "gene regulation",
+              "immune system process",
+              "metabolic process",
+              "morphogenesis/development",
+              "multicellular organismal process",
+              "neural related process",
+              "other",
+              "protein modification/signaling",
+              "receptor related process",
+              "response to stimulus",
+              "stress response",
+              "transport",
+              "viral related process"
+  )
+  colors <- c("#3ef5f0","#7030a0","#808080","#b4c7e7","#2e75b6","#f8cbad","#ff0000",
+              "#ff00ff","#548235","#be73b8","#009999","#f2f2f2","#cccc00","#cfffc4","#ffff00",
+              "#ff8000","#00ff00","#00b0f0"
+  )
+  
+  if(is.null(data)) {
+    return(NULL)
+  }
+  data <- ref[which(ref[,"term_id"] %in% data[,"term_id"]),]
+  classes_in_data <- which(groups %in% unique(data[,"Class"]))
+  not_in_data <- seq(1,18)[-c(which(groups %in% unique(data[,"Class"])))]
+  
+  p <- ggplot(data, aes(x = -Y, y = X, label = text, colour = Class)) +
+    labs(
+      x = "t-SNE Dimension 1",
+      y = "t-SNE Dimension 2"
+    ) +
+    geom_point(size = 1.5) +
+    scale_color_manual(values = colors[c(classes_in_data)]) +
+    theme_minimal() +
+    theme(panel.background = element_rect(fill = 'white', colour = 'white')) +
+    theme(
+      axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      axis.text.y=element_blank(),
+      axis.ticks.y=element_blank()
+    )
+  fig <- ggplotly(p)
+  
+  fig <- fig |>
+    layout(
+      paper_bgcolor = "#fffffd",  # Background outside the plotting area
+      plot_bgcolor = "#fffffd"        # Background inside the plotting area
+    )
+  return(fig)
+}
+
 classification.look.up <- read.csv("www/data/Annotation_Results.csv")
+tsne.look.up <- read.csv("www/data/tsne_inferation.csv")
+colnames(tsne.look.up)[1] <- "term_id"
 colnames(classification.look.up)[1] <- "term_id"
 ui <- fluidPage(
     useShinyjs(),
@@ -96,8 +155,10 @@ ui <- fluidPage(
     tags$head(
         tags$link(rel = "stylesheet", type = "text/css", href = "style.css"),
         tags$style(HTML("
-          .sidebar { width: 25% !important; min-width: 200px; }
-          .main-panel { width: 75% !important; }
+          .sidebar { width: 15% !important; min-width: 200px; }
+          .col-sm-4 { width: 200px; !important; }
+          .col-sm-8 { width: 83% !important; max-width: calc(100% - 205px)!important; margin-left: 5px; }
+          .main-panel { width: 82.5% !important; }
         "))
     ),
     sidebarLayout(
@@ -125,7 +186,12 @@ ui <- fluidPage(
         actionButton("check_btn", "Check Columns", class = "btn-primary")
         ),
         mainPanel(
-          plotlyOutput('plot'),
+          tabsetPanel(
+            id = "tabsPanel",
+            tabPanel("Pie Chart", plotlyOutput("pie_plot")),
+            tabPanel("Scatter Plot", plotlyOutput("scatter_plot")),
+            tabPanel("Table", div(tableOutput("my_table"),style = "height:500px; overflow-y: scroll;overflow-x: scroll;"))
+          ),
           tags$div(id = "spinner", style = "display:none; color: #2c3e50; font-weight: bold; margin-top: 10px;",
                    "Preparing your download..."),
           div(
@@ -156,11 +222,17 @@ Shiny.addCustomMessageHandler('showOverlay', function(message) {
   }
 });
 Shiny.addCustomMessageHandler('getSVG', function(message) {
+  start = 0;
+  end = 2;
+  if(message[0] == 'Scatter Plot') {
+    start = 3;
+    end = 5;
+  }
   document.getElementById('spinner').style.display = 'block';
   var width = document.getElementsByClassName('main-svg').item(0).getAttribute(\"width\")
   var height = document.getElementsByClassName('main-svg').item(0).getAttribute(\"height\")
   var mergedSVG = '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"'+width+'\" height=\"'+height+'\" viewBox=\"0 0 '+width+' '+height+'\">';
-  for (var i = 0; i < document.getElementsByClassName('main-svg').length; i++) {
+  for (var i = start; i < end; i++) {
     mergedSVG += document.getElementsByClassName('main-svg').item(i).innerHTML
   }
   
@@ -191,7 +263,7 @@ get_file_extension <- function(filename) {
 server <- function(input, output, session) {
 
   data_reactive <- reactiveVal()
-  
+  current_tab <- reactiveVal()
   observeEvent(input$upload_file, {
     req(input$upload_file)
     
@@ -211,6 +283,10 @@ server <- function(input, output, session) {
     data_reactive(df)
   })
   
+  observeEvent(input$tabsPanel,{
+    current_tab(input$tabsPanel)
+  })
+  
   observeEvent(input$check_btn, {
     
   })
@@ -219,6 +295,7 @@ server <- function(input, output, session) {
     req(data_reactive(), input$termname_col)
     
     df_recieved <- data_reactive()
+    output$my_table <- renderTable(df_recieved)
     
     termname_col <- trimws(input$termname_col)
     intersection_col <- trimws(input$intersection_col)
@@ -253,13 +330,21 @@ server <- function(input, output, session) {
       runjs("document.getElementById('overlay').style.display = 'flex';")
       df_col <- df_recieved
       colnames(df_col)[which(colnames(df_col) == termname_col)] <- "term_id"
-      plotly_plot <- plotPieChart(df_col, classification.look.up, title = "", by_gene_weight = input$gene_weights)
+      
+      plotly_pie_plot <- plotPieChart(df_col, classification.look.up, title = "", by_gene_weight = input$gene_weights)
+      
+      plotly_scatter_plot <- plotScatterPlot(df_col, tsne.look.up, title = "")
       
       runjs("document.getElementById('overlay').style.display = 'none';")
       
-      output$plot <- renderPlotly(
+      output$pie_plot <- renderPlotly(
         {
-          plotly_plot
+          plotly_pie_plot
+        }
+      )
+      output$scatter_plot <- renderPlotly(
+        {
+          plotly_scatter_plot
         }
       )
     }
@@ -275,7 +360,8 @@ server <- function(input, output, session) {
   })
   
   observeEvent(input$prepare_svg, {
-    session$sendCustomMessage("getSVG", list())
+    cTab <- current_tab()
+    session$sendCustomMessage("getSVG", list(cTab))
   })
   
   observeEvent(input$svg_data, {
