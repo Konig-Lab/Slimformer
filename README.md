@@ -1,1 +1,1 @@
-# ViGOCat
+# Slimformer
