@@ -1,358 +1,548 @@
-library(shiny)
-library(plotly)
-library(dplyr)
-library(stringi)
-library(readxl)
-library(shinyjs)
+################ Init Slimformer ################
 
-# Workaround for Chromium Issue 468227
+library(shiny)
+library(bslib)
+library(shinyjs)
+library(plotly)
+library(readxl)
+library(stringi)
+library(colorspace)
+library(bslib)
+
+groups <- c("cell adhesion",
+            "cell cycle",
+            "cell death",
+            "cellular component organization",
+            "ER/endosome/lysosome related process",
+            "gene regulation",
+            "immune system process",
+            "metabolic process",
+            "morphogenesis/development",
+            "multicellular organismal process",
+            "neural related process",
+            "other",
+            "protein modification/signaling",
+            "receptor related process",
+            "response to stimulus",
+            "stress response",
+            "transport",
+            "viral related process"
+)
+colors <- c("#3ef5f0","#7030a0","#808080","#b4c7e7","#2e75b6","#f8cbad","#ff0000",
+            "#ff00ff","#548235","#be73b8","#009999","#f2f2f2","#cccc00","#cfffc4","#ffff00",
+            "#ff8000","#00ff00","#00b0f0"
+)
+
+pal53 <- read.csv("www/data/pal53.csv", row.names = 1)[,1]
+
+inference <- read.delim("www/data/inference.tsv", sep="\t", row.names = 1)
+reference <- read.delim("www/data/reference.tsv", sep="\t", row.names = 1)
+som_map <- read.delim("www/data/som_map.tsv", sep="\t", row.names = 1)
+
+################ functions.R ################
+
+make_palette_hcl <- function(n, palette = "Dark 3", seed = 1) {
+  set.seed(seed)
+  qualitative_hcl(n, palette = palette)   # Alternativen: "Set 2", "Set 3", "Dark 3"
+}
+
 downloadButton <- function(...) {
   tag <- shiny::downloadButton(...)
   tag$attribs$download <- NULL
-  tag
+  return(tag)
 }
 
-joinRef <- function(data, ref) {
-  if("Group" %in% colnames(data)) {
+joinRef <- function(data, ref, term_id) {
+  if("Group" %in% colnames(data) && "Group" %in% colnames(ref)) {
     group_index <- which(colnames(data) == "Group")
     colnames(data)[group_index] <- "Group.X"
   }
-  data <- left_join(data, ref, by = "term_id")
-  data
+  colnames(ref)[1] <- term_id
+  data <- dplyr::left_join(data, ref, by = term_id)
+  return(data)
 }
 
-plotPieChart <- function(data, ref, title="Pie Chart", by_gene_weight = FALSE) {
-  groups <- c("cell adhesion",
-              "cell cycle",
-              "cell death",
-              "cellular component organization",
-              "ER/endosome/lysosome related process",
-              "gene regulation",
-              "immune system process",
-              "metabolic process",
-              "morphogenesis/development",
-              "multicellular organismal process",
-              "neural related process",
-              "other",
-              "protein modification/signaling",
-              "receptor related process",
-              "response to stimulus",
-              "stress response",
-              "transport",
-              "viral related process"
-  )
-  colors <- c("#3ef5f0","#7030a0","#808080","#b4c7e7","#2e75b6","#f8cbad","#ff0000",
-              "#ff00ff","#548235","#be73b8","#009999","#f2f2f2","#cccc00","#cfffc4","#ffff00",
-              "#ff8000","#00ff00","#00b0f0"
-  )
+computeClusterName <- function(data, infer, term_col, intersect_col = NULL) {
+  cluster.df <- data.frame(cluster_id = unique(data$Subcluster), cluster_name = "")
+  if(!(intersect_col %in% colnames(data))) {
+    intersect_col <- NULL
+  }
+  for(c in 1:nrow(cluster.df)) {
+    cluster.id <- cluster.df$cluster_id[c]
+    term.ids <- data[which(data$Subcluster == cluster.id), term_col]
+    term.sizes <- seq(length(term.ids), 1)
+    if(!is.null(intersect_col)) {
+      term.sizes <- lapply(
+        stringi::stri_split_regex(data[which(data$Subcluster == cluster.id), intersect_col], ","),
+        length
+      )
+    }
+    term.id <- term.ids[which.max(term.sizes)]
+    cluster.df$cluster_name[c] <- infer[term.id, 4]
+    
+    data$Subcluster[which(data$Subcluster == cluster.id)] <- cluster.df$cluster_name[c]
+  }
   
+  return(data)
+}
+
+getFileExtension <- function(filename) {
+  return(sub(".*\\.([^.]+)$", "\\1", filename))
+}
+
+firstup <- function(x) {
+  if(length(x) > 0) {
+    substr(x, 1, 1) <- toupper(substr(x, 1, 1))
+  }
+  return(x)
+}
+
+plotPieChart <- function(data, term_col, intersect_col, groups, colors, title = "", use_gene_weight = FALSE) {
   if(is.null(data)) {
     return(NULL)
   }
-  if("Group" %in% colnames(data)) {
-    group_index <- which(colnames(data) == "Group")
-    colnames(data)[group_index] <- "Group.X"
-  }
-  data <- left_join(data, ref, by = "term_id")
   group_index <- which(colnames(data) == "Group")
-  df <- data.frame(Category = names(table(data[,group_index])), Value = as.vector(unname(table(data[,group_index]))))
-  colors_df <- data.frame(groups = groups, colors = colors)[which(groups %in% df$Category),]
-  if(by_gene_weight == TRUE) {
-    unique_genes <- unique(unlist(stri_split(paste0(data$intersection, collapse = ","), regex = ",")))
+  
+  tbl.df <- data.frame(Category = unique(data[,group_index]), Value = as.vector(unname(table(data[,group_index]))))
+  colors.df <- data.frame(groups = groups, colors = colors)[which(groups %in% tbl.df$Category),]
+  if(use_gene_weight == TRUE) {
+    unique_genes <- unique(unlist(stringi::stri_split(paste0(data[, intersect_col], collapse = ","), regex = ",")))
     
-    annotation_matrix = matrix(0, nrow = nrow(data), ncol = length(unique_genes))
-    rownames(annotation_matrix) <- data$term_id
-    colnames(annotation_matrix) <- unique_genes
-    for(r in 1:nrow(data)) {
-      genes <- unlist(stri_split(data$intersection[r], regex = ","))
-      annotation_matrix[data$term_id[r],genes] <- 1
+    annotation_mat <- matrix(0, nrow = nrow(data), ncol = length(unique_genes))
+    rownames(annotation_mat) <- data[, term_col]
+    colnames(annotation_mat) <- unique_genes
+    for(r in 1:nrow(annotation_mat)) {
+      genes <- unlist(stringi::stri_split(data[r, intersect_col], regex = ","))
+      annotation_mat[r, genes] <- 1
     }
-    colsums <- colSums(annotation_matrix)
-    annotation_matrix <- t(t(annotation_matrix) / colsums)
-    tmp_df <- cbind(data, data.frame(value=rowSums(annotation_matrix)))
-    df <- data.frame(Category=colors_df$groups, Value=rep(NA, nrow(colors_df)))
-    for(i in 1:nrow(colors_df)) {
-      code <- colors_df$groups[i]
-      df$Value[i] <- sum(tmp_df$value[which(tmp_df$Group == code)])
+    colsums <- colSums(annotation_mat)
+    annotation_mat <- t(t(annotation_mat) / colsums)
+    tmp.df <- cbind(data, data.frame(value = rowSums(annotation_mat)))
+    tbl.df <- data.frame(Category = colors.df$groups, Value = rep(NA, nrow(colors.df)))
+    for(i in 1:nrow(colors.df)) {
+      code <- colors.df$groups[i]
+      tbl.df$Value[i] <- sum(tmp.df$value[which(tmp.df[,group_index] == code)])
     }
   }
-  fig <- plot_ly(df, labels = ~Category, values = ~Value, type = 'pie',
-                 textinfo='percent',
-                 hoverinfo = 'text',
-                 text = ~paste0(Category),
-                 marker = list(colors = colors_df$colors,
-                               line = list(color = '#FFFFFF', width = 1)))
-  fig <- fig %>% layout(title = title,
-                        xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
-                        yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+  tbl.df$Category <- firstup(tbl.df$Category)
+  tbl.df <- tbl.df[order(tbl.df$Category),]
+  fig <- plotly::plot_ly(tbl.df, 
+                         labels = ~Category, 
+                         values = ~Value, 
+                         type = 'pie',
+                         textinfo = 'percent',
+                         hoverinfo = 'text',
+                         text = ~paste0(Category),
+                         marker = list(colors = colors.df$colors,
+                                       line = list(color = "#FFFFFF", width = 1))
+  )
+  fig <- fig |> 
+    plotly::layout(
+      title = title,
+      xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+      yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
   return(fig)
 }
 
-plotScatterPlot <- function(data, ref, title="Scatter Plot") {
-  groups <- c("cell adhesion",
-              "cell cycle",
-              "cell death",
-              "cellular component organization",
-              "ER/endosome/lysosome related process",
-              "gene regulation",
-              "immune system process",
-              "metabolic process",
-              "morphogenesis/development",
-              "multicellular organismal process",
-              "neural related process",
-              "other",
-              "protein modification/signaling",
-              "receptor related process",
-              "response to stimulus",
-              "stress response",
-              "transport",
-              "viral related process"
-  )
-  colors <- c("#3ef5f0","#7030a0","#808080","#b4c7e7","#2e75b6","#f8cbad","#ff0000",
-              "#ff00ff","#548235","#be73b8","#009999","#f2f2f2","#cccc00","#cfffc4","#ffff00",
-              "#ff8000","#00ff00","#00b0f0"
-  )
-  
+plotScatterPlot <- function(data, term_col, groups, colors, infer, show_subclusters = FALSE, line_width = 2, subcluster_col = NULL, subcluster_palette = NULL, title="") {
   if(is.null(data)) {
     return(NULL)
   }
-  data <- ref[which(ref[,"term_id"] %in% data[,"term_id"]),]
-  classes_in_data <- which(groups %in% unique(data[,"Class"]))
-  not_in_data <- seq(1,18)[-c(which(groups %in% unique(data[,"Class"])))]
+  rownames(data) <- data[[term_col]]
+  pos.df <- infer[rownames(infer) %in% data[[term_col]], , drop = FALSE]
+  if (nrow(pos.df) == 0) return(NULL)
   
-  p <- ggplot(data, aes(x = -Y, y = X, label = text, colour = Class)) +
-    labs(
-      x = "t-SNE Dimension 1",
-      y = "t-SNE Dimension 2"
-    ) +
-    geom_point(size = 1.5) +
-    scale_color_manual(values = colors[c(classes_in_data)]) +
-    theme_minimal() +
-    theme(panel.background = element_rect(fill = 'white', colour = 'white')) +
-    theme(
-      axis.text.x=element_blank(),
-      axis.ticks.x=element_blank(),
-      axis.text.y=element_blank(),
-      axis.ticks.y=element_blank()
-    )
-  fig <- ggplotly(p)
+  # harmonisieren
+  pos.df$Class <- firstup(pos.df$Class)
+  pos.df$text  <- firstup(pos.df$text)
+  
+  # Cluster-Farbmapping stabilisieren
+  names(colors) <- firstup(groups)
+  
+  # Subcluster-Spalte bestimmen (Standard: letzte Spalte von 'data')
+  if (isTRUE(show_subclusters)) {
+    if (is.null(subcluster_col)) {
+      subcluster_col <- names(data)[ncol(data)]
+    }
+    pos.df$Subcluster <- firstup(data[rownames(pos.df), subcluster_col])
+    pos.df$Subcluster <- if (is.factor(pos.df$Subcluster)) pos.df$Subcluster else factor(pos.df$Subcluster)
+    
+    # Palette für Subcluster (nur für Outline)
+    if (is.null(subcluster_palette)) {
+      # einfache, reproduzierbare Palette (53+ Farben) – gern durch deine Funktion ersetzen
+      pal <- pal53
+      names(pal) <- levels(pos.df$Subcluster)
+      sub_pal <- pal
+    } else {
+      sub_pal <- subcluster_palette
+      if (is.null(names(sub_pal))) names(sub_pal) <- levels(pos.df$Subcluster)
+    }
+    pos.df$line_col <- unname(sub_pal[as.character(pos.df$Subcluster)])
+  }
+  
+  # Leere Figur starten
+  fig <- plotly::plot_ly()
+  
+  # Für jede Cluster-Kategorie ein eigener Trace -> erzeugt saubere Legende
+  cls <- unique(pos.df$Class)
+  for (cl in cls) {
+    dsub <- pos.df[pos.df$Class == cl, , drop = FALSE]
+    # fester Fill je Cluster (kein Vektor!) -> Legendeneintrag
+    base_marker <- list(size = 10, color = colors[[cl]])
+    if (isTRUE(show_subclusters)) {
+      base_marker$line <- list(color = dsub$line_col, width = line_width) # Vektor ok
+    }
+    
+    fig <- fig |>
+      plotly::add_trace(
+        data = dsub,
+        x = ~(-Y), y = ~X,
+        type = "scatter", mode = "markers",
+        name = cl, showlegend = TRUE,
+        marker = base_marker,
+        hoverinfo = "text",
+        text = ~paste0(
+          "Category: ", Class,
+          "<br>Name: ", text,
+          if (show_subclusters) paste0("<br>Subcluster: ", Subcluster) else ""
+        )
+      )
+  }
+  
+  # Ein einziger Legenden-Eintrag für den Subcluster-Ring
+  if (isTRUE(show_subclusters)) {
+    fig <- fig |>
+      plotly::add_trace(
+        x = NA, y = NA, type = "scatter", mode = "markers",
+        name = "Subcluster (Rand)", showlegend = TRUE,
+        marker = list(size = 10, color = "white", line = list(color = "black", width = 2)),
+        inherit = FALSE
+      )
+  }
   
   fig <- fig |>
-    layout(
-      paper_bgcolor = "#fffffd",  # Background outside the plotting area
-      plot_bgcolor = "#fffffd"        # Background inside the plotting area
+    plotly::layout(
+      title = title,
+      paper_bgcolor = "#FFFFFF",
+      plot_bgcolor = "#FFFFFF"
     )
+  
   return(fig)
 }
 
-classification.look.up <- read.csv("www/data/Annotation_Results.csv")
-tsne.look.up <- read.csv("www/data/tsne_inferation.csv")
-colnames(tsne.look.up)[1] <- "term_id"
-colnames(classification.look.up)[1] <- "term_id"
-ui <- fluidPage(
-    useShinyjs(),
-    titlePanel("Upload and Validate Data"),
-    tags$head(
-        tags$link(rel = "stylesheet", type = "text/css", href = "style.css"),
-        tags$style(HTML("
-          .sidebar { width: 15% !important; min-width: 200px; }
-          .col-sm-4 { width: 200px; !important; }
-          .col-sm-8 { width: 83% !important; max-width: calc(100% - 205px)!important; margin-left: 5px; }
-          .main-panel { width: 82.5% !important; }
-        "))
-    ),
-    sidebarLayout(
-        sidebarPanel(
-        class = "sidebar",
-        fileInput(
-          inputId = "upload_file",
-          label = "Upload CSV, TSV, or Excel File",
-          accept = c(".csv", ".tsv", ".xls", ".xlsx")
-        ),
-        
-        textInput("termname_col", "Term ID:", value = "term_id"),
-        textInput("intersection_col", "Intersection (Optional):", value = "intersection"),
-        
-        wellPanel(
-          strong("Check Input:"),
-          div(verbatimTextOutput("check_result"), 
-              style = "height: 70px; overflow-y: auto; border: 1px solid #ddd; padding: 5px; background-color: #f9f9f9;")
-        ),
-        
-        checkboxInput("gene_weights", "Gene Weights", value = FALSE),
-        
-        tags$script("$('#gene_weights').prop('disabled', true);"),
-        
-        actionButton("check_btn", "Check Columns", class = "btn-primary")
-        ),
-        mainPanel(
-          tabsetPanel(
-            id = "tabsPanel",
-            tabPanel("Pie Chart", plotlyOutput("pie_plot")),
-            tabPanel("Scatter Plot", plotlyOutput("scatter_plot")),
-            tabPanel("Table", div(tableOutput("my_table"),style = "height:500px; overflow-y: scroll;overflow-x: scroll;"))
-          ),
-          tags$div(id = "spinner", style = "display:none; color: #2c3e50; font-weight: bold; margin-top: 10px;",
-                   "Preparing your download..."),
-          div(
-            downloadButton("download_csv", "Download Annotated CSV"),
-            actionButton("prepare_svg", "Prepare & Download SVG"),
-          ),
-          tags$a(id = "download_link", href = "", download = "merged_image.svg", style = "display:none", "Click to download"),
-        )
-    ),
-    div(
-      id="overlay",
-      class = "overlay",
-      div(
-        class = "loader"
-      )
-    )
-)
 
+################ ui.R ################
 js_code <- "
 Shiny.addCustomMessageHandler('toggleCheckbox', function(enable) {
   $('#gene_weights').prop('disabled', !enable);
 });
+
 Shiny.addCustomMessageHandler('showOverlay', function(message) {
-  if (message) {
-    document.getElementById('overlay').style.display = 'flex!important';
+  var overlay = document.getElementById('overlay');
+  if(message) {
+    overlay.style.display = 'flex!important';
   } else {
-    document.getElementById('overlay').style.display = 'none';
+    overlay.style.display = 'none';
   }
 });
+
 Shiny.addCustomMessageHandler('getSVG', function(message) {
   start = 0;
   end = 2;
+  var mainSVGs = document.getElementsByClassName('main-svg')
   if(message[0] == 'Scatter Plot') {
-    start = 3;
-    end = 5;
+    start = mainSVGs.length-3;
+    end = mainSVGs.length-1;
   }
+  console.log(start);
+  console.log(end);
+  console.log(mainSVGs)
   document.getElementById('spinner').style.display = 'block';
-  var width = document.getElementsByClassName('main-svg').item(0).getAttribute(\"width\")
-  var height = document.getElementsByClassName('main-svg').item(0).getAttribute(\"height\")
+  const width = mainSVGs.item(0).getAttribute(\"width\");
+  const height = mainSVGs.item(0).getAttribute(\"height\");
   var mergedSVG = '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"'+width+'\" height=\"'+height+'\" viewBox=\"0 0 '+width+' '+height+'\">';
-  for (var i = start; i < end; i++) {
-    mergedSVG += document.getElementsByClassName('main-svg').item(i).innerHTML
+  for(var i = start; i < end; i++) {
+    mergedSVG += mainSVGs.item(i).innerHTML;
   }
-  
   mergedSVG += '</svg>';
   Shiny.setInputValue('svg_data', mergedSVG, {priority: 'event'});
 });
 
-Shiny.addCustomMessageHandler('triggerDownload', function(svg_string) {
-  document.getElementById('spinner').style.display = 'none';
+Shiny.addCustomMessageHandler('downloadSVG', function(svg_string) {
   const blob = new Blob([svg_string], { type: 'image/svg+xml' });
   const url = URL.createObjectURL(blob);
   const link = document.getElementById('download_link');
   link.href = url;
-  console.log('DOWNLOAD TRIGGERED')
+  
+  const tabs_panel = document.getElementById('tabs_panel');
+  for( var i = 0; i < tabs_panel.childElementCount; i++) {
+    if(tabs_panel.children[i].children[0].hasAttribute('tabindex') == false) {
+      const names = tabs_panel.children[i].children[0].getAttribute('data-value').split(' ');
+      let yourDate = new Date()
+      let yourDateArr = yourDate.toISOString().split('T').join('_').split(':')
+      if(names[0] == 'Scatter') {
+        link.download = 'Slimformer'+names[0]+names[1]+'_'+yourDateArr[0]+':'+yourDateArr[1]+'.svg'
+      }
+      if(names[0] == 'Pie') {
+        link.download = 'SlimformerPieChart_'+yourDateArr[0]+':'+yourDateArr[1]+'.svg'
+      }
+    }
+  }
+  
+  document.getElementById('spinner').style.display = 'none';
+  
   link.click();
 });
 "
 
-ui <- tagList(
-  tags$head(tags$script(HTML(js_code))),
-  ui
+# Define UI for application that draws a histogram
+ui <- shiny::tagList(
+  shiny::tags$head(shiny::tags$script(shiny::HTML(js_code))),
+  shiny::fluidPage(
+    shinyjs::useShinyjs(),
+    theme = bs_theme(version = 5),
+    # Application title
+    titlePanel("Slimformer"),
+    
+    # Sidebar with a slider input for number of bins 
+    sidebarLayout(
+      sidebarPanel(
+        class = "sidebar",
+        style = "height:95vh",
+        fileInput(
+          inputId = "upload_data",
+          label = "Upload CSV, TSV or Excel File:",
+          accept = c(".csv", ".tsv", ".xls", ".xlsx")
+        ),
+        shiny::h6("Term ID column: ",bslib::tooltip(
+          span(icon("circle-question"), class = "text-muted ms-1"),
+          "The name of the column storing the GO term IDs. 'term_id' is the default for g:Profiler2 output.",
+          placement = "right"  # top/bottom/left/right/auto
+        ),
+        style = "margin-bottom: -10px;"),
+        textInput("term_name_col","", value = "term_id"),
+        shiny::h6("Intersect column (Optional): ", 
+                  bslib::tooltip(
+                    span(icon("circle-question"), class = "text-muted ms-1"),
+                    "The name of the column storing the Genes associated with the GO terms. 'intersection' is the default for g:Profiler2 output.",
+                    placement = "right"  # top/bottom/left/right/auto
+                  ),
+                  style = "margin-bottom: -10px;"
+        ),
+        textInput("intersect_col", "", value = "intersection"),
+        div(
+          shiny::p("Use Gene Weights:",bslib::tooltip(
+            span(icon("circle-question"), class = "text-muted ms-1"),
+            "Should the sizes of the pie slices be calculated via 'gene weight' or by number of gene sets? For more information on 'gene weight' please see the publication.",
+            placement = "right"  # top/bottom/left/right/auto
+          )), 
+          checkboxInput("gene_weights", "", value = FALSE),
+          style = "display: grid; grid-template-columns: 175px 20px;",
+        ),
+        tags$script("$('#gene_weights').prop('disabled', true);"),
+        wellPanel(
+          strong("Check Input:"),
+          div(verbatimTextOutput("check_result"), 
+              style = "min-height: 70px; max-height: 300px; height: auto; overflow-y: auto; border: 1px solid #ddd; padding: 5px; background-color: #f9f9f9;")
+        ),
+        div(
+          style = "padding-top: 20px;",
+          shiny::p("Show Subclusters:",bslib::tooltip(
+            span(icon("circle-question"), class = "text-muted ms-1"),
+            "Should the subclusters of the gene sets be shown. This is for a finer-grained overview only.",
+            placement = "right"  # top/bottom/left/right/auto
+          )), 
+          checkboxInput("show_outline", "", value = FALSE),
+          style = "display: grid; grid-template-columns: 175px 20px;",
+        ),
+        sliderInput("outline_w", "Outline Width", min = 0, max = 5, value = 2, step = 0.5)
+      ),
+      
+      # Show a plot of the generated distribution
+      mainPanel(
+        tabsetPanel(
+          id = "tabs_panel",
+          tabPanel("Data Table", id = 'data_table', div(DT::DTOutput("data_table", height = "85vh", width = "98%"), style = "margin-top: 10px")),
+          tabPanel("Pie Chart", id = 'pie_chart', plotly::plotlyOutput("pie_plot", height = "85vh", width = "98%")),
+          tabPanel("Scatter Plot", id = 'scatter_plot', plotly::plotlyOutput("scatter_plot", height = "85vh", width = "98%"))
+        ),
+        tags$div(id = "spinner", style = "display:none; color: #2C3E50; font-weight: bold; margin-top: 10px;", "Preparing your download..."),
+        div(
+          downloadButton("download_tsv", "Download Annotated TSV"),
+          actionButton("prepare_svg", "Download SVG")
+        ),
+        tags$a(id = "download_link", href = "", download = "SlimformerPlot.svg", style = "display:none;", "Click to download")
+      )
+    ),
+    div(
+      id = "overlay",
+      class = "overlay",
+      div(class = "loader")
+    )
+  )
 )
 
-get_file_extension <- function(filename) {
-  sub(".*\\.([^.]+)$", "\\1", filename)
-}
 
+################ server.R ################
+# Define server logic required to draw a histogram
 server <- function(input, output, session) {
-
-  data_reactive <- reactiveVal()
-  current_tab <- reactiveVal()
-  observeEvent(input$upload_file, {
-    req(input$upload_file)
+  
+  renderData <- function(data, term_col) {
+    if(!is.null(data) && (term_col != "" && term_col %in% colnames(data))) {
+      if("Group" %in% colnames(data)) {
+        data <- data[,-c(which(colnames(data) == "Group"))]
+      }
+      if("QC" %in% colnames(data)) {
+        data <- data[,-c(which(colnames(data) == "QC"))]
+      }
+      if("Subcluster" %in% colnames(data)) {
+        data <- data[,-c(which(colnames(data) == "Subcluster"))]
+      }
+      data <- joinRef(data, reference, term_col)
+      data <- joinRef(data, som_map, term_col)
+      data <- computeClusterName(data, inference, term_col, input$intersect_col)
+    }
     
-    file_path <- input$upload_file$datapath
-    ext <- tolower(get_file_extension(file_path))
-    
-    df <- switch(ext,
-                 csv  = read.delim(file_path, sep = ","),
-                 tsv  = read.delim(file_path),
-                 xls  = read_excel(file_path),
-                 xlsx = read_excel(file_path),
-                 {
-                   showNotification("Unsupported file type", type = "error")
-                   return(NULL)
-                 }
+    output$data_table <- DT::renderDT(data, extensions = "Buttons", options = list(scrollX = TRUE, scrollY = "65vh", scrollCollapse = TRUE,
+                                                                                   columnDefs = list(list(
+                                                                                     targets = "_all",
+                                                                                     render = DT::JS(
+                                                                                       "function(data, type, row, meta) {",
+                                                                                       "return type === 'display' && data != null && data.length > 30 ?",
+                                                                                       "'<span title=\"' + data + '\">' + data.substr(0, 30) + '...</span>' : data;",
+                                                                                       "}")
+                                                                                   )),
+                                                                                   dom = "Bfrtip",
+                                                                                   buttons = list(
+                                                                                     list(extend = "colvis", text = "Visible Columns")  # Dropdown mit Checkboxen
+                                                                                   ),
+                                                                                   paging = FALSE),
+                                      class = "display")
+    return(data)
+  }
+  
+  data_reactive <- shiny::reactiveVal()
+  shiny::observeEvent(input$upload_data,{
+    shiny::req(input$upload_data)
+    file_path <- input$upload_data$datapath
+    file_extension <- tolower(getFileExtension(file_path))
+    df <- switch(
+      file_extension,
+      csv = {
+        tbl <- NA
+        try(
+          {tbl <- read.csv(file_path, row.names = 1)}, silent = TRUE)
+        if(is.na(tbl)) {
+          tbl <- read.csv(file_path, row.names = NULL)
+        }
+        tbl <- renderData(tbl, input$term_name_col)
+        data_reactive(tbl)
+        return(tbl)
+      },
+      tsv = {
+        tbl <- NA
+        try(
+          {tbl <- read.delim(file_path, sep = "\t", row.names = 1)}, silent = TRUE)
+        if(is.na(tbl)) {
+          tbl <- read.delim(file_path, sep = "\t", row.names = NULL)
+        }
+        tbl <- renderData(tbl, input$term_name_col)
+        data_reactive(tbl)
+        return(tbl)
+      },
+      xls = {
+        tbl <- read_excel(file_path)
+        tbl <- renderData(tbl, input$term_name_col)
+        data_reactive(tbl)
+        return(tbl)
+      },
+      xlsx = {
+        tbl <- read_excel(file_path)
+        tbl <- renderData(tbl, input$term_name_col)
+        data_reactive(tbl)
+        return(tbl)
+      },
+      {
+        shiny::showModal(
+          modalDialog(
+            title = "Unsupported File Type",
+            p("Please use one of the following file types:"),
+            p("'.csv', '.tsv', '.xls', '.xlsx'"),
+            easyClose = TRUE
+          )
+        )
+        return(NULL)
+      }
     )
-    data_reactive(df)
   })
   
-  observeEvent(input$tabsPanel,{
-    current_tab(input$tabsPanel)
+  current_tab <- shiny::reactiveVal()
+  shiny::observeEvent(input$tabs_panel, {
+    current_tab(input$tabs_panel)
   })
   
-  observeEvent(input$check_btn, {
-    
-  })
-  
-  observe({
-    req(data_reactive(), input$termname_col)
+  shiny::observe({
+    shiny::req(input$term_name_col)
     
     df_recieved <- data_reactive()
-    output$my_table <- renderTable(df_recieved)
+    df_recieved <- renderData(df_recieved, input$term_name_col)
     
-    termname_col <- trimws(input$termname_col)
-    intersection_col <- trimws(input$intersection_col)
-    
-    missing_cols <- c()
-    
-    
-    if (termname_col == "" || !(termname_col %in% names(df_recieved))) {
-      missing_cols <- c(missing_cols, paste("❌ Mandatory column missing:", termname_col))
-    }
-    
-    
-    intersection_present <- FALSE
-    if (intersection_col != ""){
-      if(!(intersection_col %in% names(df_recieved))) {
-        missing_cols <- c(missing_cols, paste("⚠️ Optional column missing:", intersection_col))
-        missing_cols <- c(missing_cols, paste("❌ Gene Weight disabled!"))
-      } else {
-        intersection_present <- TRUE
+    if(!is.null(df_recieved)) {
+      term_col <- trimws(input$term_name_col)
+      intersect_col <- trimws(input$intersect_col)
+      
+      missing_cols <- c()
+      
+      if (term_col == "" || !(term_col %in% names(df_recieved))) {
+        missing_cols <- c(missing_cols, paste("❌ Mandatory column missing:", term_col))
       }
-    }
-    
-    
-    result <- if (length(missing_cols) == 0) {
-      "✅ All specified columns are present!"
-    } else {
-      paste(missing_cols, collapse = "\n")
-    }
-    
-    output$check_result <- renderText({ result })
-    if(termname_col != "" && termname_col %in% names(df_recieved)) {
-      runjs("document.getElementById('overlay').style.display = 'flex';")
-      df_col <- df_recieved
-      colnames(df_col)[which(colnames(df_col) == termname_col)] <- "term_id"
       
-      plotly_pie_plot <- plotPieChart(df_col, classification.look.up, title = "", by_gene_weight = input$gene_weights)
       
-      plotly_scatter_plot <- plotScatterPlot(df_col, tsne.look.up, title = "")
-      
-      runjs("document.getElementById('overlay').style.display = 'none';")
-      
-      output$pie_plot <- renderPlotly(
-        {
-          plotly_pie_plot
+      intersection_present <- FALSE
+      if (intersect_col != ""){
+        if(!(intersect_col %in% names(df_recieved))) {
+          missing_cols <- c(missing_cols, paste("⚠️ Optional column missing:", intersect_col))
+          missing_cols <- c(missing_cols, paste("❌ Gene Weight disabled!"))
+        } else {
+          intersection_present <- TRUE
         }
-      )
-      output$scatter_plot <- renderPlotly(
-        {
-          plotly_scatter_plot
-        }
-      )
+      }
+      
+      
+      result <- if (length(missing_cols) == 0) {
+        "✅ All specified columns are present!"
+      } else {
+        paste(missing_cols, collapse = "\n")
+      }
+      
+      output$check_result <- renderText({ result })
+      
+      if(term_col != "" && term_col %in% names(df_recieved)) {
+        shinyjs::runjs("document.getElementById('overlay').style.display = 'flex';")
+        df_col <- df_recieved
+        colnames(df_col)[which(colnames(df_col) == term_col)] <- "term_id"
+        
+        plotly_pie_plot <- plotPieChart(df_col, term_col, intersect_col, groups, colors, title = "", use_gene_weight = input$gene_weights)
+        
+        plotly_scatter_plot <- plotScatterPlot(df_col, term_col, groups, colors, infer = inference, show_subclusters = input$show_outline, line_width = input$outline_w, title = "")
+        
+        output$pie_plot <- plotly::renderPlotly(
+          {
+            plotly_pie_plot
+          }
+        )
+        output$scatter_plot <- plotly::renderPlotly(
+          {
+            plotly_scatter_plot
+          }
+        )
+        shinyjs::runjs("document.getElementById('overlay').style.display = 'none';")
+      }
+      session$sendCustomMessage(type = "toggleCheckbox", intersection_present)
     }
-    session$sendCustomMessage(type = "toggleCheckbox", intersection_present)
   })
   
   svg_content <- reactiveVal("")
-  
   observe({
     if (!is.null(input$svg_data)) {
       svg_content(input$svg_data)
@@ -366,22 +556,21 @@ server <- function(input, output, session) {
   
   observeEvent(input$svg_data, {
     if (nzchar(input$svg_data)) {
-      session$sendCustomMessage("triggerDownload", input$svg_data)
+      session$sendCustomMessage("downloadSVG", input$svg_data)
     }
   })
-  output$download_csv <- downloadHandler(
+  output$download_tsv <- downloadHandler(
     filename = function() {
-      paste("annotated_", Sys.Date(), ".csv", sep="")
+      paste("SlimformerAnnotated_",head(unlist(stringi::stri_split(input$upload_data$name, regex = "\\.")), -1),"_", Sys.Date(), ".tsv", sep="")
     },
     content = function(file) {
-      df_col <- data_reactive()
-      colnames(df_col)[which(colnames(df_col) == input$termname_col)] <- "term_id"
-      data <- joinRef(data_reactive(), classification.look.up)
-      colnames(df_col)[which(colnames(df_col) == "term_id")] <- input$termname_col
-      write.csv(data, file, row.names=FALSE)
+      data <- data_reactive()
+      write.table(data, file, sep = "\t", row.names=FALSE)
     },
-    contentType = "text/csv"
+    contentType = "text/tsv"
   )
 }
 
+################ Run Shiny App ################
+# Run the application 
 shinyApp(ui = ui, server = server)
