@@ -247,7 +247,17 @@ This ensures consistent annotation across datasets.
 
 <br />
 
-# 7. Troubleshooting
+# 7. Re-train for Custom Database
+
+To use a custom database the models need to be re-trained.
+
+1. One should define the documents for document embedding
+2. Re-train the doc2vec model
+3. Use labeled document embeddings for training a classifier.
+
+For a Flow-Chart of the training process see: [Supplemental Material]().
+
+# 8. Troubleshooting
 
 ### Pie Chart is empty
 
@@ -269,13 +279,13 @@ This ensures consistent annotation across datasets.
 
 ***
 
-# 8. Citation
+# 9. Citation
 
 If you use Slimformer in research or publications, please cite:
 
 *To be announced (publication in pre-proof)*
 
-# 9. Example Data
+# 10. Example Data
 
 Provided are two example data sets.
 
@@ -283,3 +293,4 @@ Provided are two example data sets.
 
 RSV example from:
 Xu X, Qiao D, Mann M, Garofalo RP et al. Respiratory Syncytial Virus Infection Induces Chromatin Remodeling to Activate Growth Factor and Extracellular Matrix Secretion Pathways. Viruses 2020 Jul 26;12(8). PMID: 32722537
+
