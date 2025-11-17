@@ -61,8 +61,8 @@ plotPieChart <- function(data, term_col, intersect_col, groups, colors, title = 
     return(NULL)
   }
   group_index <- which(colnames(data) == "Group")
-  
-  tbl.df <- data.frame(Category = unique(data[,group_index]), Value = as.vector(unname(table(data[,group_index]))))
+  tbl <- as.data.frame(table(data[,group_index]))
+  tbl.df <- data.frame(Category = as.vector(tbl$Var1), Value = as.vector(tbl$Freq))
   colors.df <- data.frame(groups = groups, colors = colors)[which(groups %in% tbl.df$Category),]
   if(use_gene_weight == TRUE) {
     unique_genes <- unique(unlist(stringi::stri_split(paste0(data[, intersect_col], collapse = ","), regex = ",")))

@@ -65,7 +65,22 @@ Shiny.addCustomMessageHandler('downloadSVG', function(svg_string) {
 
 # Define UI for application that draws a histogram
 ui <- shiny::tagList(
-  shiny::tags$head(shiny::tags$script(shiny::HTML(js_code))),
+  shiny::tags$head(
+    shiny::tags$script(shiny::HTML(js_code)),
+    shiny::tags$style(HTML("
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      height: 95vh;
+    }
+    .sidebar-bottom {
+      margin-top: auto;
+      padding-top: 20px;
+      color: #333;
+      font-size: 0.9em;
+    }
+  "))
+  ),
   shiny::fluidPage(
     shinyjs::useShinyjs(),
     theme = bs_theme(version = 5),
@@ -123,7 +138,12 @@ ui <- shiny::tagList(
           checkboxInput("show_outline", "", value = FALSE),
           style = "display: grid; grid-template-columns: 175px 20px;",
         ),
-        sliderInput("outline_w", "Outline Width", min = 0, max = 5, value = 2, step = 0.5)
+        sliderInput("outline_w", "Outline Width", min = 0, max = 5, value = 2, step = 0.5),
+        div(
+          class = "sidebar-bottom",
+          shiny::p("See", shiny::a("README", href='https://github.com/Konig-Lab/Slimformer/blob/main/README.md'), "for Tutorial and example data."),
+          shiny::p("If you use Slimformer, please cite: TBA.")
+        )
       ),
       
       # Show a plot of the generated distribution

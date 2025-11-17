@@ -102,8 +102,8 @@ plotPieChart <- function(data, term_col, intersect_col, groups, colors, title = 
     return(NULL)
   }
   group_index <- which(colnames(data) == "Group")
-  
-  tbl.df <- data.frame(Category = unique(data[,group_index]), Value = as.vector(unname(table(data[,group_index]))))
+  tbl <- as.data.frame(table(data[,group_index]))
+  tbl.df <- data.frame(Category = as.vector(tbl$Var1), Value = as.vector(tbl$Freq))
   colors.df <- data.frame(groups = groups, colors = colors)[which(groups %in% tbl.df$Category),]
   if(use_gene_weight == TRUE) {
     unique_genes <- unique(unlist(stringi::stri_split(paste0(data[, intersect_col], collapse = ","), regex = ",")))
@@ -297,7 +297,22 @@ Shiny.addCustomMessageHandler('downloadSVG', function(svg_string) {
 
 # Define UI for application that draws a histogram
 ui <- shiny::tagList(
-  shiny::tags$head(shiny::tags$script(shiny::HTML(js_code))),
+  shiny::tags$head(
+    shiny::tags$script(shiny::HTML(js_code)),
+    shiny::tags$style(HTML("
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      height: 95vh;
+    }
+    .sidebar-bottom {
+      margin-top: auto;
+      padding-top: 20px;
+      color: #333;
+      font-size: 0.9em;
+    }
+  "))
+  ),
   shiny::fluidPage(
     shinyjs::useShinyjs(),
     theme = bs_theme(version = 5),
@@ -355,7 +370,12 @@ ui <- shiny::tagList(
           checkboxInput("show_outline", "", value = FALSE),
           style = "display: grid; grid-template-columns: 175px 20px;",
         ),
-        sliderInput("outline_w", "Outline Width", min = 0, max = 5, value = 2, step = 0.5)
+        sliderInput("outline_w", "Outline Width", min = 0, max = 5, value = 2, step = 0.5),
+        div(
+          class = "sidebar-bottom",
+          shiny::p("See", shiny::a("README", href='https://github.com/Konig-Lab/Slimformer/blob/main/README.md'), "for Tutorial and example data."),
+          shiny::p("If you use Slimformer, please cite: TBA.")
+        )
       ),
       
       # Show a plot of the generated distribution
