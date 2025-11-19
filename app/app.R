@@ -41,6 +41,48 @@ som_map <- read.delim("www/data/som_map.tsv", sep="\t", row.names = 1)
 
 ################ functions.R ################
 
+readCSV <- function(filepath) {
+  tryCatch(
+    {
+      message("This is the 'try' part. Will read with row.names = 1")
+      
+      suppressWarnings(read.csv(filepath, row.names = 1))
+    },
+    error = function(cond) {
+      message(paste("No row names...."))
+      # Choose a return value in case of error
+      read.csv(filepath, row.names = NULL)
+    },
+    warning = function(cond) {
+      NULL
+    },
+    finally = {
+      message(paste("Processed URL:", filepath))
+    }
+  )
+}
+
+readTSV <- function(filepath) {
+  tryCatch(
+    {
+      message("This is the 'try' part. Will read with row.names = 1")
+      
+      suppressWarnings(read.delim(filepath, row.names = 1, sep = "\t"))
+    },
+    error = function(cond) {
+      message(paste("No row names...."))
+      # Choose a return value in case of error
+      read.delim(filepath, row.names = NULL, sep = "\t")
+    },
+    warning = function(cond) {
+      NULL
+    },
+    finally = {
+      message(paste("Processed URL:", filepath))
+    }
+  )
+}
+
 make_palette_hcl <- function(n, palette = "Dark 3", seed = 1) {
   set.seed(seed)
   qualitative_hcl(n, palette = palette)   # Alternativen: "Set 2", "Set 3", "Dark 3"
@@ -71,6 +113,9 @@ computeClusterName <- function(data, infer, term_col, intersect_col = NULL) {
     cluster.id <- cluster.df$cluster_id[c]
     term.ids <- data[which(data$Subcluster == cluster.id), term_col]
     term.sizes <- seq(length(term.ids), 1)
+    if(length(term.ids) == 0) {
+      next
+    }
     if(!is.null(intersect_col)) {
       term.sizes <- lapply(
         stringi::stri_split_regex(data[which(data$Subcluster == cluster.id), intersect_col], ","),
@@ -78,7 +123,9 @@ computeClusterName <- function(data, infer, term_col, intersect_col = NULL) {
       )
     }
     term.id <- term.ids[which.max(term.sizes)]
-    cluster.df$cluster_name[c] <- infer[term.id, 4]
+    if(term.id %in% rownames(infer)) {
+      cluster.df$cluster_name[c] <- infer[term.id, 4]
+    }
     
     data$Subcluster[which(data$Subcluster == cluster.id)] <- cluster.df$cluster_name[c]
   }
@@ -103,7 +150,8 @@ plotPieChart <- function(data, term_col, intersect_col, groups, colors, title = 
   }
   group_index <- which(colnames(data) == "Group")
   tbl <- as.data.frame(table(data[,group_index]))
-  tbl.df <- data.frame(Category = as.vector(tbl$Var1), Value = as.vector(tbl$Freq))
+  View(tbl)
+  tbl.df <- data.frame(Category = as.vector(tbl[,1]), Value = as.vector(tbl[,2]))
   colors.df <- data.frame(groups = groups, colors = colors)[which(groups %in% tbl.df$Category),]
   if(use_gene_weight == TRUE) {
     unique_genes <- unique(unlist(stringi::stri_split(paste0(data[, intersect_col], collapse = ","), regex = ",")))
@@ -450,22 +498,14 @@ server <- function(input, output, session) {
       file_extension,
       csv = {
         tbl <- NA
-        try(
-          {tbl <- read.csv(file_path, row.names = 1)}, silent = TRUE)
-        if(is.na(tbl)) {
-          tbl <- read.csv(file_path, row.names = NULL)
-        }
+        tbl <- readCSV(file_path)
         tbl <- renderData(tbl, input$term_name_col)
         data_reactive(tbl)
         return(tbl)
       },
       tsv = {
         tbl <- NA
-        try(
-          {tbl <- read.delim(file_path, sep = "\t", row.names = 1)}, silent = TRUE)
-        if(is.na(tbl)) {
-          tbl <- read.delim(file_path, sep = "\t", row.names = NULL)
-        }
+        tbl <- readTSV(file_path)
         tbl <- renderData(tbl, input$term_name_col)
         data_reactive(tbl)
         return(tbl)
