@@ -150,7 +150,6 @@ plotPieChart <- function(data, term_col, intersect_col, groups, colors, title = 
   }
   group_index <- which(colnames(data) == "Group")
   tbl <- as.data.frame(table(data[,group_index]))
-  View(tbl)
   tbl.df <- data.frame(Category = as.vector(tbl[,1]), Value = as.vector(tbl[,2]))
   colors.df <- data.frame(groups = groups, colors = colors)[which(groups %in% tbl.df$Category),]
   if(use_gene_weight == TRUE) {
@@ -511,13 +510,13 @@ server <- function(input, output, session) {
         return(tbl)
       },
       xls = {
-        tbl <- read_excel(file_path)
+        tbl <- as.data.frame(readxl::read_xls(file_path))
         tbl <- renderData(tbl, input$term_name_col)
         data_reactive(tbl)
         return(tbl)
       },
       xlsx = {
-        tbl <- read_excel(file_path)
+        tbl <- as.data.frame(readxl::read_xlsx(file_path))
         tbl <- renderData(tbl, input$term_name_col)
         data_reactive(tbl)
         return(tbl)
