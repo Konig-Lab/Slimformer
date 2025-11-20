@@ -525,7 +525,9 @@ server <- function(input, output, session) {
       message("Reading data from JS-converted Excel (tsv-text).")
       tsv_text <- input$excel_tsv
       tbl <- read.delim(text = tsv_text, stringsAsFactors = FALSE)
-      tbl<- tbl[-c(which(tbl[[input$term_name_col]] == "")),]
+      if(length(which(tbl[[input$term_name_col]] == ""))>0) {
+        tbl<- tbl[-c(which(tbl[[input$term_name_col]] == "")),]
+      }
       tbl <- renderData(tbl, input$term_name_col)
       data_reactive(tbl)
       return(tbl)

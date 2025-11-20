@@ -1,6 +1,5 @@
 $(document).on('shiny:connected', function(event) {
   console.log("Check for excel...")
-  console.log($('#upload_data')[0])
   if (!$('#upload_data')[0]) return;
   
   $('#upload_data').on("change", function(e) {
@@ -26,9 +25,7 @@ $(document).on('shiny:connected', function(event) {
     const reader = new FileReader();
 
     reader.onload = function(evt) {
-      console.log(evt)
       const data = new Uint8Array(evt.target.result);
-      console.log(data)
       try {
         const workbook = XLSX.read(data, { type: "array" });
         
@@ -39,8 +36,6 @@ $(document).on('shiny:connected', function(event) {
           FS: "\t",
           RS: "\n"
         });
-        
-        console.log(tsv);
         
         Shiny.setInputValue("excel_tsv", tsv, { priority: "event" });
       } catch (err) {
