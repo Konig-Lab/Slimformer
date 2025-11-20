@@ -4,7 +4,7 @@ library(shiny)
 library(bslib)
 library(shinyjs)
 library(plotly)
-library(readxl)
+library(openxlsx)
 library(stringi)
 library(colorspace)
 library(bslib)
@@ -73,6 +73,32 @@ readTSV <- function(filepath) {
       message(paste("No row names...."))
       # Choose a return value in case of error
       read.delim(filepath, row.names = NULL, sep = "\t")
+    },
+    warning = function(cond) {
+      NULL
+    },
+    finally = {
+      message(paste("Processed URL:", filepath))
+    }
+  )
+}
+
+readEXCEL <- function(filepath) {
+  file <- filepath
+  file2 <- tempfile(fileext = ".xlsx")
+  
+  # Datei manuell in das WebR-Filesystem kopieren
+  file.copy(file, file2, overwrite = TRUE)
+  tryCatch(
+    {
+      message("This is the 'try' part. Will read with col_names = TRUE")
+      
+      openxlsx::readWorkbook(file2)
+    },
+    error = function(cond) {
+      message(paste("No column names...."))
+      # Choose a return value in case of error
+      openxlsx::readWorkbook(file2)
     },
     warning = function(cond) {
       NULL
@@ -195,6 +221,7 @@ plotScatterPlot <- function(data, term_col, groups, colors, infer, show_subclust
   if(is.null(data)) {
     return(NULL)
   }
+  print(data[[term_col]][which(duplicated(data[[term_col]]))])
   rownames(data) <- data[[term_col]]
   pos.df <- infer[rownames(infer) %in% data[[term_col]], , drop = FALSE]
   if (nrow(pos.df) == 0) return(NULL)
@@ -346,6 +373,8 @@ Shiny.addCustomMessageHandler('downloadSVG', function(svg_string) {
 ui <- shiny::tagList(
   shiny::tags$head(
     shiny::tags$script(shiny::HTML(js_code)),
+    tags$script(src = "xlsx.full.min.js"),
+    tags$script(src = "excel_to_tsv.js"),
     shiny::tags$style(HTML("
     .sidebar {
       display: flex;
@@ -491,48 +520,49 @@ server <- function(input, output, session) {
   data_reactive <- shiny::reactiveVal()
   shiny::observeEvent(input$upload_data,{
     shiny::req(input$upload_data)
-    file_path <- input$upload_data$datapath
-    file_extension <- tolower(getFileExtension(file_path))
-    df <- switch(
-      file_extension,
-      csv = {
-        tbl <- NA
-        tbl <- readCSV(file_path)
-        tbl <- renderData(tbl, input$term_name_col)
-        data_reactive(tbl)
-        return(tbl)
-      },
-      tsv = {
-        tbl <- NA
-        tbl <- readTSV(file_path)
-        tbl <- renderData(tbl, input$term_name_col)
-        data_reactive(tbl)
-        return(tbl)
-      },
-      xls = {
-        tbl <- as.data.frame(readxl::read_xls(file_path))
-        tbl <- renderData(tbl, input$term_name_col)
-        data_reactive(tbl)
-        return(tbl)
-      },
-      xlsx = {
-        tbl <- as.data.frame(readxl::read_xlsx(file_path))
-        tbl <- renderData(tbl, input$term_name_col)
-        data_reactive(tbl)
-        return(tbl)
-      },
-      {
-        shiny::showModal(
-          modalDialog(
-            title = "Unsupported File Type",
-            p("Please use one of the following file types:"),
-            p("'.csv', '.tsv', '.xls', '.xlsx'"),
-            easyClose = TRUE
+    session$sendCustomMessage("CheckExcel", input$upload_data)
+    if (!is.null(input$excel_tsv) && nzchar(input$excel_tsv)) {
+      message("Reading data from JS-converted Excel (tsv-text).")
+      tsv_text <- input$excel_tsv
+      tbl <- read.delim(text = tsv_text, stringsAsFactors = FALSE)
+      tbl<- tbl[-c(which(tbl[[input$term_name_col]] == "")),]
+      tbl <- renderData(tbl, input$term_name_col)
+      data_reactive(tbl)
+      return(tbl)
+    }
+    if (!is.null(input$upload_data)) {
+      message("Reading data direct from input$file$datapath (non-Excel file).")
+      file_path <- input$upload_data$datapath
+      file_extension <- tolower(getFileExtension(file_path))
+      df <- switch(
+        file_extension,
+        csv = {
+          tbl <- NA
+          tbl <- readCSV(file_path)
+          tbl <- renderData(tbl, input$term_name_col)
+          data_reactive(tbl)
+          return(tbl)
+        },
+        tsv = {
+          tbl <- NA
+          tbl <- readTSV(file_path)
+          tbl <- renderData(tbl, input$term_name_col)
+          data_reactive(tbl)
+          return(tbl)
+        },
+        {
+          shiny::showModal(
+            modalDialog(
+              title = "Unsupported File Type",
+              p("Please use one of the following file types:"),
+              p("'.csv', '.tsv', '.xls', '.xlsx'"),
+              easyClose = TRUE
+            )
           )
-        )
-        return(NULL)
-      }
-    )
+          return(NULL)
+        }
+      )
+    }
   })
   
   current_tab <- shiny::reactiveVal()
