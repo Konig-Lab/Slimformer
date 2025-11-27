@@ -4,7 +4,6 @@ library(shiny)
 library(bslib)
 library(shinyjs)
 library(plotly)
-library(openxlsx)
 library(stringi)
 library(colorspace)
 library(bslib)
@@ -482,7 +481,7 @@ ui <- shiny::tagList(
 ################ server.R ################
 # Define server logic required to draw a histogram
 server <- function(input, output, session) {
-  
+  options(shiny.maxRequestSize = 30*1024^2)
   renderData <- function(data, term_col) {
     if(!is.null(data) && (term_col != "" && term_col %in% colnames(data))) {
       if("Group" %in% colnames(data)) {
