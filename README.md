@@ -283,7 +283,14 @@ For a Flow-Chart of the training process see: [Supplemental Material]().
 
 If you use Slimformer in research or publications, please cite:
 
-*To be announced (publication in pre-proof)*
+Fionn Daire Keogh, Jonas Marx, Alicia Hiemisch, Rainer Koenig,
+Slimformer: An NLP-based web server for semantic categorization of gene sets,
+Computational and Structural Biotechnology Journal,
+Volume 27,
+2025,
+Pages 5252-5262,
+ISSN 2001-0370,
+https://doi.org/10.1016/j.csbj.2025.11.035.
 
 # 10. Example Data
 
